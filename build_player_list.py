@@ -4,6 +4,7 @@ import re
 import fpl_trans as ft
 import urls
 import pandas as pd
+import http_cache
 
 
 def build():
@@ -34,7 +35,8 @@ def build():
         return 0
 
     # understats data
-    under_html = requests.get(urls.understat_current_season).text
+    under_html = http_cache.cached_get(urls.understat_current_season, 
+                                       http_cache.CACHE_DURATION_SEASON_OVERVIEW).text
 
     #  player data from understat
     player_data_text = re.search(r"playersData	= JSON\.parse\(\'(.*)\'\)", under_html, re.MULTILINE).group(1)
@@ -47,8 +49,14 @@ def build():
     df_master = df_master.merge(df_understat[
                                     ['player_name', 'team_title', 'red_cards', 'games', 'position', 'yellow_cards',
                                      'npg', 'assists', 'goals']], on='player_name', how='right')
-    df_master = df_master.apply(pd.to_numeric, errors='ignore')
     df_master.rename(columns={"team_title": "team"}, inplace=True)
+    # Convert numeric columns where possible, but preserve team and player names as strings
+    for col in df_master.columns:
+        if col not in ['team', 'player_name', 'position']:
+            try:
+                df_master[col] = pd.to_numeric(df_master[col], errors='coerce')
+            except (ValueError, TypeError):
+                pass
 
     # Goals conceded data
     team_data_text = re.search(r"teamsData = JSON\.parse\(\'(.*)\'\)", under_html, re.MULTILINE).group(1)
@@ -65,6 +73,9 @@ def build():
 
     #  clean sheets data
     df_cs = pd.read_excel('clean_sheets.xlsx')
+    # Ensure team column is string type for proper merging
+    df_cs['team'] = df_cs['team'].astype(str)
+    df_master['team'] = df_master['team'].astype(str)
 
     #  FPL api data
     response_ = requests.get(urls.fpl_api)
@@ -74,7 +85,7 @@ def build():
     # df_api['team'] = df_api['team'].apply(lambda x: ft.teams_trans[x])
     df_api['now_cost'] = df_api['now_cost'] / 10
     df_api = df_api[['player_name', 'total_points', 'element_type', 'now_cost', 'minutes', 'web_name']]
-    df_api['player_name'].replace(ft.player_trans, inplace=True)
+    df_api['player_name'] = df_api['player_name'].replace(ft.player_trans)
 
     # Merge all data together
     df_master = df_master.merge(df_cs[['team', 'xCS']], on='team', how='left')
@@ -122,7 +133,7 @@ def build():
                            'xPoints', 'xPoints_per_mil', 'xPointsP90', 'xPointsP90_per_mil',
                            'actualP_per_mil', 'actualP_P90_per_mil'
                            ]]
-    df_master.to_excel('out.xlsx', encoding='utf-8')
+    df_master.to_excel('out.xlsx')
 
 
 if __name__ == "__main__":

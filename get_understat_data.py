@@ -7,6 +7,7 @@ import pandas as pd
 import requests
 import fpl_trans
 import urls
+import http_cache
 
 teams = fpl_trans.teams
 saved_match_ids = []
@@ -19,7 +20,8 @@ if path.exists("match_data_raw.xlsx"):
 def get_match_ids():
     match_ids = []
     for team in teams:
-        raw_html = requests.get(f"{urls.understat_team}{team}/2020").text
+        raw_html = http_cache.cached_get(f"{urls.understat_team}{team}/2020", 
+                                         http_cache.CACHE_DURATION_TEAM_DATA).text
         # print(raw_html)
 
         # Only works if datesData is first on page. Note sure why
@@ -41,7 +43,8 @@ def get_match_data(match_ids):
     match_data = []
     for match_id in match_ids:
 
-        game_html = requests.get(f"{urls.understat_match}{match_id}").text
+        game_html = http_cache.cached_get(f"{urls.understat_match}{match_id}", 
+                                          http_cache.CACHE_DURATION_MATCH_DATA).text
         roster_data_text = re.search(r"rostersData.+= JSON\.parse\(\'(.*)\'\)", game_html, re.MULTILINE).group(1)
         roster_data_json = bytes(roster_data_text, "utf-8").decode('unicode_escape')
         roster_data = json.loads(roster_data_json)
@@ -65,8 +68,7 @@ if __name__ == "__main__":
     df_match_data = pd.DataFrame(match_data)
     df_match_data = df_match_data.apply(pd.to_numeric, errors='ignore')
     if path.exists("match_data_raw.xlsx"):
-        #  Todo: Is this adding an extra index column?
-        df_match_data = df_match_data_saved.append(df_match_data)
+        df_match_data = pd.concat([df_match_data_saved, df_match_data], ignore_index=True)
     df_match_data.to_excel('match_data_raw.xlsx')
 
     # Drop players that aren't in a current premier league team
